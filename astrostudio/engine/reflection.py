@@ -24,7 +24,9 @@ try:
 except ImportError:  # پروژه باید حتی بدون این کتابخانه هم کار کند (fallback ساده‌تر)
     _HAS_DOCSTRING_PARSER = False
 
-from .node import NodeSpec, ParamSpec, PortSpec
+from .node import (
+    NodeSpec, ParamSpec, input_ports_from_params, result_output_ports,
+)
 
 
 def _annotation_to_str(annotation: Any) -> str:
@@ -97,7 +99,6 @@ def reflect(callable_ref: Callable, *, category: str = "",
     summary, param_docs, full_doc = _parse_docstring(raw_doc)
 
     params: list[ParamSpec] = []
-    inputs: list[PortSpec] = []
 
     for name, p in sig.parameters.items():
         if name in ("self", "cls"):
@@ -117,18 +118,8 @@ def reflect(callable_ref: Callable, *, category: str = "",
         )
         params.append(param_spec)
 
-        # هر پارامتر همزمان یک "پورت ورودی" هم هست -> می‌تواند از خروجی
-        # Node دیگری هم مقدار بگیرد، یا از پنل مقدار ثابت بگیرد.
-        inputs.append(PortSpec(
-            name=name,
-            annotation=param_spec.annotation,
-            description=param_spec.description,
-            direction="in",
-        ))
-
-    output_type = _guess_output_type(callable_ref, is_class)
-    outputs = [PortSpec(name="result", annotation=output_type,
-                         description="خروجی این بلوک", direction="out")]
+    inputs = input_ports_from_params(params)
+    outputs = result_output_ports(_guess_output_type(callable_ref, is_class))
 
     module = getattr(callable_ref, "__module__", "")
     qualname = getattr(callable_ref, "__qualname__", getattr(callable_ref, "__name__", "node"))

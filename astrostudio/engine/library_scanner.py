@@ -19,6 +19,17 @@ from .node import NodeSpec
 from .reflection import reflect
 
 
+def safe_reflect(callable_ref, *, category: str = "") -> NodeSpec | None:
+    """
+    reflect با تحمل خطا: اگر یک عضو خاص قابل reflect نبود (مثلاً امضای
+    عجیبی دارد) به‌جای توقف کل اسکن، None برمی‌گرداند.
+    """
+    try:
+        return reflect(callable_ref, category=category)
+    except Exception:
+        return None
+
+
 def scan_module(module: ModuleType | str, *,
                  include: Iterable[str] | None = None,
                  exclude: Iterable[str] | None = None,
@@ -51,13 +62,10 @@ def scan_module(module: ModuleType | str, *,
         if member_module and not member_module.startswith(module.__name__.split(".")[0]):
             continue
 
-        try:
-            spec = reflect(member, category=module.__name__)
-            specs.append(spec)
-        except Exception:
-            # اگر یک عضو خاص قابل reflect نبود (مثلاً امضای عجیب دارد)،
-            # کل اسکن نباید متوقف شود.
+        spec = safe_reflect(member, category=module.__name__)
+        if spec is None:
             continue
+        specs.append(spec)
 
         if max_items is not None and len(specs) >= max_items:
             break
@@ -67,10 +75,5 @@ def scan_module(module: ModuleType | str, *,
 
 def scan_callable_list(callables: Iterable, category: str = "") -> list[NodeSpec]:
     """نسخه‌ی ساده‌تر: لیست مشخصی از توابع/کلاس‌ها را مستقیماً reflect می‌کند."""
-    specs = []
-    for c in callables:
-        try:
-            specs.append(reflect(c, category=category))
-        except Exception:
-            continue
-    return specs
+    specs = [safe_reflect(c, category=category) for c in callables]
+    return [s for s in specs if s is not None]

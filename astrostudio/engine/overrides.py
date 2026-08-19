@@ -20,7 +20,9 @@ from __future__ import annotations
 
 from astropy.coordinates import SkyCoord
 
-from .node import NodeSpec, ParamSpec, PortSpec
+from .node import (
+    NodeSpec, ParamSpec, input_ports_from_params, result_output_ports,
+)
 
 
 def skycoord_node_spec() -> NodeSpec:
@@ -35,10 +37,8 @@ def skycoord_node_spec() -> NodeSpec:
         ParamSpec(name="frame", annotation="str", default="icrs", has_default=True,
                    required=False, description="سیستم مرجع مختصات، مثل 'icrs', 'galactic'"),
     ]
-    inputs = [PortSpec(name=p.name, annotation=p.annotation,
-                        description=p.description, direction="in") for p in params]
-    outputs = [PortSpec(name="result", annotation="SkyCoord",
-                         description="شیء مختصات ساخته‌شده", direction="out")]
+    inputs = input_ports_from_params(params)
+    outputs = result_output_ports("SkyCoord", "شیء مختصات ساخته‌شده")
 
     return NodeSpec(
         id="astropy.coordinates.SkyCoord.manual",

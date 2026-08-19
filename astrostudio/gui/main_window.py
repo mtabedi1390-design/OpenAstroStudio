@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QPushButton, QTextEdit, QTabWidget, QLabel, QMessageBox,
+    QMainWindow, QWidget, QVBoxLayout, QSplitter,
+    QPushButton, QTabWidget, QMessageBox,
 )
 
 from ..engine.node import NodeSpec
@@ -21,11 +21,13 @@ from ..engine.codegen import generate_code
 from ..engine.executor import execute_direct
 from ..engine.overrides import skycoord_node_spec
 from ..engine.reflection import reflect
+from ..engine.utils import format_exception
 from ..libraries.astropy_adapters import to_galactic, separation_deg
 
 from .node_editor import NodeEditorScene, NodeEditorView
 from .property_panel import PropertyPanel
 from .library_panel import LibraryPanel
+from .widgets import make_monospace_view
 
 
 def default_library() -> list[NodeSpec]:
@@ -56,13 +58,8 @@ class MainWindow(QMainWindow):
         self.property_panel.value_changed.connect(self._refresh_code_preview)
         self.scene.graph_changed.connect(self._refresh_code_preview)
 
-        self.code_view = QTextEdit()
-        self.code_view.setReadOnly(True)
-        self.code_view.setStyleSheet("font-family: monospace; font-size: 11px;")
-
-        self.console_view = QTextEdit()
-        self.console_view.setReadOnly(True)
-        self.console_view.setStyleSheet("font-family: monospace; font-size: 11px; color: #7CFC00; background: #111;")
+        self.code_view = make_monospace_view()
+        self.console_view = make_monospace_view(text_color="#7CFC00", background="#111")
 
         run_button = QPushButton("▶  اجرا (Run)")
         run_button.clicked.connect(self._run_graph)
@@ -106,7 +103,7 @@ class MainWindow(QMainWindow):
             code = generate_code(self.scene.graph)
             self.code_view.setPlainText(code)
         except Exception as exc:  # noqa: BLE001
-            self.code_view.setPlainText(f"# کد قابل تولید نیست:\n# {type(exc).__name__}: {exc}")
+            self.code_view.setPlainText(f"# کد قابل تولید نیست:\n# {format_exception(exc)}")
 
     def _run_graph(self):
         if not self.scene.graph.nodes:

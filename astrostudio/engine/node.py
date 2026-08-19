@@ -46,6 +46,22 @@ class PortSpec:
     direction: str = "in"  # "in" | "out"
 
 
+def input_ports_from_params(params: list[ParamSpec]) -> list[PortSpec]:
+    """هر پارامتر همزمان یک پورت ورودی هم هست (مقدار ثابت یا خروجی Node دیگر)."""
+    return [
+        PortSpec(name=p.name, annotation=p.annotation,
+                 description=p.description, direction="in")
+        for p in params
+    ]
+
+
+def result_output_ports(annotation: str = "Any",
+                        description: str = "خروجی این بلوک") -> list[PortSpec]:
+    """پورت خروجی استاندارد هر بلوک (فعلاً همیشه یک خروجی به نام result)."""
+    return [PortSpec(name="result", annotation=annotation,
+                     description=description, direction="out")]
+
+
 @dataclass
 class NodeSpec:
     """
