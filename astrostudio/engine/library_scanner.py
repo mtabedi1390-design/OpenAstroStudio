@@ -12,23 +12,31 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 from types import ModuleType
 from typing import Iterable
 
 from .node import NodeSpec
 from .reflection import reflect
 
+logger = logging.getLogger(__name__)
+
 
 def scan_module(module: ModuleType | str, *,
                  include: Iterable[str] | None = None,
                  exclude: Iterable[str] | None = None,
-                 max_items: int | None = None) -> list[NodeSpec]:
+                 max_items: int | None = None,
+                 strict: bool = False,
+                 errors: list[tuple[str, Exception]] | None = None) -> list[NodeSpec]:
     """
     ماژول را اسکن کرده و لیستی از NodeSpec برمی‌گرداند.
 
     include/exclude: لیست نام‌های دقیق برای فیلتر کردن (اگر داده نشود، همه‌ی
     اعضای عمومی -- یعنی بدون آندرلاین پیشوندی -- در نظر گرفته می‌شوند).
     max_items: برای جلوگیری از overload در اسکن کتابخانه‌های بسیار بزرگ.
+    strict: اگر True باشد، اولین عضو غیرقابل‌reflect خطا می‌دهد (برای تست/دیباگ).
+    errors: اگر داده شود، زوج (نام عضو، خطا) برای اعضای ردشده در این لیست
+    جمع می‌شود؛ به این ترتیب خطاها در سکوت دور ریخته نمی‌شوند.
     """
     if isinstance(module, str):
         module = importlib.import_module(module)
@@ -54,9 +62,8 @@ def scan_module(module: ModuleType | str, *,
         try:
             spec = reflect(member, category=module.__name__)
             specs.append(spec)
-        except Exception:
-            # اگر یک عضو خاص قابل reflect نبود (مثلاً امضای عجیب دارد)،
-            # کل اسکن نباید متوقف شود.
+        except Exception as exc:  # یک عضو معیوب نباید کل اسکن را متوقف کند
+            _record_skip(f"{module.__name__}.{name}", exc, strict=strict, errors=errors)
             continue
 
         if max_items is not None and len(specs) >= max_items:
@@ -65,12 +72,27 @@ def scan_module(module: ModuleType | str, *,
     return specs
 
 
-def scan_callable_list(callables: Iterable, category: str = "") -> list[NodeSpec]:
+def scan_callable_list(callables: Iterable, category: str = "", *,
+                        strict: bool = False,
+                        errors: list[tuple[str, Exception]] | None = None) -> list[NodeSpec]:
     """نسخه‌ی ساده‌تر: لیست مشخصی از توابع/کلاس‌ها را مستقیماً reflect می‌کند."""
     specs = []
     for c in callables:
         try:
             specs.append(reflect(c, category=category))
-        except Exception:
+        except Exception as exc:  # مطابق scan_module
+            _record_skip(getattr(c, "__qualname__", repr(c)), exc,
+                         strict=strict, errors=errors)
             continue
     return specs
+
+
+def _record_skip(member_name: str, exc: Exception, *, strict: bool,
+                  errors: list[tuple[str, Exception]] | None) -> None:
+    """عضو غیرقابل‌reflect را گزارش می‌کند (لاگ + لیست خطاها) یا دوباره raise می‌کند."""
+    if strict:
+        raise exc
+    if errors is not None:
+        errors.append((member_name, exc))
+    logger.info("reflect برای %s ممکن نبود و رد شد: %s: %s",
+                member_name, type(exc).__name__, exc)

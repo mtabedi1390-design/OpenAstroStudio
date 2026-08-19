@@ -15,15 +15,21 @@ engine/reflection.py
 from __future__ import annotations
 
 import inspect
-import typing
+import logging
 from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     import docstring_parser
     _HAS_DOCSTRING_PARSER = True
 except ImportError:  # پروژه باید حتی بدون این کتابخانه هم کار کند (fallback ساده‌تر)
+    logger.warning(
+        "docstring_parser نصب نیست؛ توضیح پارامترها در پنل نمایش داده نمی‌شود"
+    )
     _HAS_DOCSTRING_PARSER = False
 
+from .errors import ReflectionError
 from .node import NodeSpec, ParamSpec, PortSpec
 
 
@@ -58,8 +64,9 @@ def _parse_docstring(doc: Optional[str]) -> tuple[str, dict[str, str], str]:
                 if p.arg_name
             }
             return summary, param_docs, doc
-        except Exception:
-            pass  # اگر پارس شکست خورد، به fallback برو
+        except Exception:  # مستندات نباید کل reflect را بشکند
+            logger.warning("پارس docstring شکست خورد؛ fallback ساده استفاده می‌شود",
+                           exc_info=True)
 
     first_line = doc.strip().splitlines()[0].strip()
     return first_line, {}, doc
@@ -71,7 +78,8 @@ def _guess_output_type(callable_ref: Callable, is_class: bool) -> str:
     try:
         sig = inspect.signature(callable_ref)
         return _annotation_to_str(sig.return_annotation)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        logger.debug("نوع خروجی %r قابل تشخیص نیست (%s)", callable_ref, exc)
         return "Any"
 
 
@@ -83,6 +91,9 @@ def reflect(callable_ref: Callable, *, category: str = "",
 
     یک تابع یا کلاس پایتون می‌گیرد و یک NodeSpec کامل تولید می‌کند که
     شامل پارامترها، پورت‌های ورودی/خروجی و مستندات است.
+
+    اگر امضای callable قابل خواندن نباشد ReflectionError می‌دهد؛ چون NodeSpec
+    بدون پارامتر برای کاربر گمراه‌کننده است (Node بدون ورودی نمایش داده می‌شد).
     """
     is_class = inspect.isclass(callable_ref)
 
@@ -90,20 +101,27 @@ def reflect(callable_ref: Callable, *, category: str = "",
     target_for_signature = callable_ref.__init__ if is_class else callable_ref
     try:
         sig = inspect.signature(target_for_signature)
-    except (ValueError, TypeError):
-        sig = inspect.Signature()
+    except (ValueError, TypeError) as exc:
+        raise ReflectionError(
+            f"امضای {getattr(callable_ref, '__qualname__', callable_ref)!r} قابل خواندن نیست "
+            f"({type(exc).__name__}: {exc})؛ برای چنین APIهایی باید در "
+            "engine/overrides.py یک NodeSpec دستی تعریف شود"
+        ) from exc
 
     raw_doc = inspect.getdoc(callable_ref) or ""
     summary, param_docs, full_doc = _parse_docstring(raw_doc)
 
     params: list[ParamSpec] = []
     inputs: list[PortSpec] = []
+    skipped_variadic: list[str] = []
 
     for name, p in sig.parameters.items():
         if name in ("self", "cls"):
             continue
         if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            continue  # *args / **kwargs فعلاً پشتیبانی نمی‌شوند (نسخه‌ی بعدی)
+            # *args / **kwargs فعلاً پشتیبانی نمی‌شوند (نسخه‌ی بعدی)
+            skipped_variadic.append(name)
+            continue
 
         has_default = p.default is not inspect.Parameter.empty
         param_spec = ParamSpec(
@@ -125,6 +143,14 @@ def reflect(callable_ref: Callable, *, category: str = "",
             description=param_spec.description,
             direction="in",
         ))
+
+    if skipped_variadic:
+        logger.warning(
+            "%s پارامترهای متغیر (%s) دارد که پشتیبانی نمی‌شوند؛ "
+            "در صورت نیاز در engine/overrides.py یک NodeSpec دستی تعریف کنید",
+            getattr(callable_ref, "__qualname__", callable_ref),
+            ", ".join(skipped_variadic),
+        )
 
     output_type = _guess_output_type(callable_ref, is_class)
     outputs = [PortSpec(name="result", annotation=output_type,

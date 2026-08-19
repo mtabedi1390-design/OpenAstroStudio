@@ -13,7 +13,7 @@ from __future__ import annotations
 import ast
 
 from .graph import Graph
-from .node import NodeInstance
+from .node import NodeInstance, has_value
 
 _SAFE_LITERAL_TYPES = (str, int, float, bool, complex, type(None))
 
@@ -78,18 +78,21 @@ def generate_code(graph: Graph) -> str:
     lines.append("")
 
     for node in order:
-        args = _build_call_arguments(graph, node)
+        args, missing = _build_call_arguments(graph, node)
         callable_name = node.spec.callable_ref.__name__
         if not callable_name.isidentifier():
             raise ValueError(f"نام callable نامعتبر است: {callable_name!r}")
         call_expr = f"{callable_name}({args})"
         var = node.var_name()
-        lines.append(f"{var} = {call_expr}  # {_sanitize_comment(node.label)}")
+        comment = _sanitize_comment(node.label)
+        if missing:
+            comment += "  -- TODO: مقدار این پارامترهای اجباری تعیین نشده است: " + ", ".join(missing)
+        lines.append(f"{var} = {call_expr}  # {comment}")
 
     return "\n".join(lines)
 
 
-def _build_call_arguments(graph: Graph, node: NodeInstance) -> str:
+def _build_call_arguments(graph: Graph, node: NodeInstance) -> tuple[str, list[str]]:
     """
     برای یک Node، رشته‌ی آرگومان‌های فراخوانی را می‌سازد؛ با در نظر گرفتن
     این‌که هر پارامتر ممکن است:
@@ -99,6 +102,7 @@ def _build_call_arguments(graph: Graph, node: NodeInstance) -> str:
     incoming = {c.target_port: c for c in graph.incoming_connections(node.id)}
 
     parts: list[str] = []
+    missing: list[str] = []
     for param in node.spec.params:
         if not param.name.isidentifier():
             raise ValueError(f"نام پارامتر نامعتبر است: {param.name!r}")
@@ -106,9 +110,12 @@ def _build_call_arguments(graph: Graph, node: NodeInstance) -> str:
             conn = incoming[param.name]
             source_node = graph.nodes[conn.source_node_id]
             parts.append(f"{param.name}={source_node.var_name()}")
-        elif param.name in node.param_values:
+        elif has_value(node, param):
             parts.append(f"{param.name}={_format_value(node.param_values[param.name])}")
         elif param.required:
-            parts.append(f"{param.name}=None  # TODO: مقدار این پارامتر تنظیم نشده است")
+            # کامنت TODO به انتهای خط منتقل می‌شود: در میانه‌ی فهرست آرگومان‌ها
+            # بقیه‌ی خط را کامنت می‌کرد و کد تولیدشده SyntaxError می‌داد.
+            parts.append(f"{param.name}=None")
+            missing.append(param.name)
 
-    return ", ".join(parts)
+    return ", ".join(parts), missing

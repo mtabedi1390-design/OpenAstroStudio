@@ -8,18 +8,24 @@ NodeEditorScene: پل بین لایه‌ی بصری (node_graphics.py) و لای
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import Qt, QPointF, Signal
 from PySide6.QtGui import QPen, QColor, QPainterPath
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsPathItem, QGraphicsView
 
+from ..engine.errors import GraphError
 from ..engine.graph import Graph
 from ..engine.node import NodeInstance, NodeSpec
 from .node_graphics import NodeGraphicsItem, ConnectionGraphicsItem, PortItem
+
+logger = logging.getLogger(__name__)
 
 
 class NodeEditorScene(QGraphicsScene):
     graph_changed = Signal()
     node_selected = Signal(object)  # NodeInstance | None
+    connection_failed = Signal(str)  # پیام خطای اتصال، برای نمایش در نوار وضعیت
 
     def __init__(self):
         super().__init__()
@@ -61,7 +67,6 @@ class NodeEditorScene(QGraphicsScene):
     # ---------- تعامل ماوس: کشیدن اتصال بین پورت‌ها ----------
 
     def mousePressEvent(self, event):
-        item = self.itemAt(event.scenePos(), self.views()[0].transform()) if self.views() else None
         port = self._find_port_at(event.scenePos())
         if port is not None and port.direction == "out":
             self._drag_source_port = port
@@ -132,7 +137,11 @@ class NodeEditorScene(QGraphicsScene):
                 source_port.node_item.node_instance.id, source_port.name,
                 target_port.node_item.node_instance.id, target_port.name,
             )
-        except KeyError:
+        except GraphError as exc:
+            # قبلاً این خطا در سکوت نادیده گرفته می‌شد و کاربر فقط می‌دید
+            # که اتصال رسم نمی‌شود، بدون این‌که بداند چرا.
+            logger.warning("ایجاد اتصال شکست خورد: %s", exc)
+            self.connection_failed.emit(str(exc))
             return
 
         conn_item = ConnectionGraphicsItem(conn.id, source_port, target_port)

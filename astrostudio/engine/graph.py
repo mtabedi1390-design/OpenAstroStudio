@@ -7,13 +7,15 @@ engine/graph.py
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
+from .errors import GraphCycleError, InvalidConnectionError
 from .node import NodeInstance, Connection
 
+logger = logging.getLogger(__name__)
 
-class GraphCycleError(Exception):
-    """وقتی گراف دارای وابستگی حلقوی باشد (A به B و B به A وابسته است)."""
+__all__ = ["Graph", "GraphCycleError", "InvalidConnectionError"]
 
 
 @dataclass
@@ -27,7 +29,8 @@ class Graph:
         self.nodes[node.id] = node
 
     def remove_node(self, node_id: str) -> None:
-        self.nodes.pop(node_id, None)
+        if self.nodes.pop(node_id, None) is None:
+            logger.warning("remove_node: unknown node id %r", node_id)
         to_remove = [
             cid for cid, c in self.connections.items()
             if c.source_node_id == node_id or c.target_node_id == node_id
@@ -37,14 +40,33 @@ class Graph:
 
     def connect(self, source_node_id: str, source_port: str,
                 target_node_id: str, target_port: str) -> Connection:
-        if source_node_id not in self.nodes or target_node_id not in self.nodes:
-            raise KeyError("هر دو Node باید قبلاً به گراف اضافه شده باشند")
+        for node_id in (source_node_id, target_node_id):
+            if node_id not in self.nodes:
+                raise InvalidConnectionError(
+                    f"Node با شناسه‌ی '{node_id}' در گراف وجود ندارد؛ "
+                    "هر دو Node باید قبلاً به گراف اضافه شده باشند"
+                )
+        if source_node_id == target_node_id:
+            raise InvalidConnectionError("یک Node نمی‌تواند به خودش وصل شود")
+
+        source = self.nodes[source_node_id]
+        target = self.nodes[target_node_id]
+        if source_port not in {p.name for p in source.spec.outputs}:
+            raise InvalidConnectionError(
+                f"پورت خروجی '{source_port}' در Node '{source.label}' وجود ندارد"
+            )
+        if target_port not in {p.name for p in target.spec.inputs}:
+            raise InvalidConnectionError(
+                f"پورت ورودی '{target_port}' در Node '{target.label}' وجود ندارد"
+            )
+
         conn = Connection.create(source_node_id, source_port, target_node_id, target_port)
         self.connections[conn.id] = conn
         return conn
 
     def disconnect(self, connection_id: str) -> None:
-        self.connections.pop(connection_id, None)
+        if self.connections.pop(connection_id, None) is None:
+            logger.warning("disconnect: unknown connection id %r", connection_id)
 
     # ---------- کوئری‌ها ----------
 
@@ -61,6 +83,8 @@ class Graph:
         مرتب‌سازی توپولوژیک Kahn: هر Node فقط پس از تمام Nodeهایی که
         به آن‌ها ورودی وصل است اجرا می‌شود.
         """
+        self.validate()
+
         in_degree = {nid: 0 for nid in self.nodes}
         for c in self.connections.values():
             in_degree[c.target_node_id] += 1
@@ -78,9 +102,28 @@ class Graph:
                     queue.append(c.target_node_id)
 
         if len(ordered_ids) != len(self.nodes):
-            raise GraphCycleError("گراف شامل وابستگی حلقوی است و قابل اجرا نیست")
+            resolved = set(ordered_ids)
+            stuck = [self.nodes[nid].label or nid
+                     for nid in self.nodes if nid not in resolved]
+            raise GraphCycleError(
+                "گراف شامل وابستگی حلقوی است و قابل اجرا نیست؛ "
+                f"Nodeهای درگیر: {', '.join(stuck)}"
+            )
 
         return [self.nodes[nid] for nid in ordered_ids]
+
+    def validate(self) -> None:
+        """سازگاری گراف را بررسی می‌کند و در صورت مشکل InvalidConnectionError می‌دهد.
+
+        بدون این بررسی، یک Connection معلق (که Nodeش حذف شده) بعداً به شکل یک
+        KeyError مبهم در دل executor ظاهر می‌شد.
+        """
+        for cid, c in self.connections.items():
+            for node_id in (c.source_node_id, c.target_node_id):
+                if node_id not in self.nodes:
+                    raise InvalidConnectionError(
+                        f"Connection '{cid}' به Node ناموجود '{node_id}' اشاره می‌کند"
+                    )
 
     def to_dict(self) -> dict:
         """برای سریالایز کردن پروژه (ذخیره/بارگذاری .astroproj)."""
