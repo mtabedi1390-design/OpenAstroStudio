@@ -228,6 +228,20 @@ astrostudio/
 
 ---
 
+# Running the Unit Tests
+
+Install the test dependencies and run the suite from the repository root:
+
+```bash
+pip install -r astrostudio/requirements-dev.txt
+pytest --cov=astrostudio --cov-report=term-missing
+```
+
+The GUI tests run headlessly; `tests/conftest.py` sets `QT_QPA_PLATFORM=offscreen`
+and shares a single `QApplication` across the session via the `qapp` fixture.
+
+---
+
 # Testing Environment
 
 AstroStudio has been tested in a **headless Qt environment** using:
