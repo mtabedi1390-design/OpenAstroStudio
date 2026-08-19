@@ -117,3 +117,15 @@ class NodeInstance:
     def var_name(self) -> str:
         """نام متغیر پایتون که در کد تولیدشده برای خروجی این Node استفاده می‌شود."""
         return f"n_{self.id}"
+
+
+def has_value(node: NodeInstance, param: ParamSpec) -> bool:
+    """آیا کاربر برای این پارامتر مقدار قابل‌استفاده‌ای تنظیم کرده است؟
+
+    خالی گذاشتن یک ورودی اجباری در پنل، مقدار None ذخیره می‌کند؛ آن را
+    «تنظیم‌نشده» می‌شماریم تا به‌جای خطای مبهم کتابخانه (مثل TypeError روی None)
+    خطای واضح MissingParameterError داده شود.
+    """
+    if param.name not in node.param_values:
+        return False
+    return not (param.required and node.param_values[param.name] is None)

@@ -10,6 +10,8 @@ gui/main_window.py
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -26,6 +28,8 @@ from ..libraries.astropy_adapters import to_galactic, separation_deg
 from .node_editor import NodeEditorScene, NodeEditorView
 from .property_panel import PropertyPanel
 from .library_panel import LibraryPanel
+
+logger = logging.getLogger(__name__)
 
 
 def default_library() -> list[NodeSpec]:
@@ -55,6 +59,7 @@ class MainWindow(QMainWindow):
         self.scene.node_selected.connect(self.property_panel.show_node)
         self.property_panel.value_changed.connect(self._refresh_code_preview)
         self.scene.graph_changed.connect(self._refresh_code_preview)
+        self.scene.connection_failed.connect(self._show_connection_error)
 
         self.code_view = QTextEdit()
         self.code_view.setReadOnly(True)
@@ -105,8 +110,13 @@ class MainWindow(QMainWindow):
         try:
             code = generate_code(self.scene.graph)
             self.code_view.setPlainText(code)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # پیش‌نمایش نباید GUI را ببندد
+            logger.exception("تولید پیش‌نمایش کد شکست خورد")
             self.code_view.setPlainText(f"# کد قابل تولید نیست:\n# {type(exc).__name__}: {exc}")
+            self.statusBar().showMessage(f"تولید کد شکست خورد: {exc}", 8000)
+
+    def _show_connection_error(self, message: str):
+        self.statusBar().showMessage(f"اتصال انجام نشد: {message}", 8000)
 
     def _run_graph(self):
         if not self.scene.graph.nodes:
@@ -122,4 +132,18 @@ class MainWindow(QMainWindow):
                 lines.append(f"  {label} -> {value!r}")
             self.console_view.setPlainText("\n".join(lines))
         else:
-            self.console_view.setPlainText(f"خطا در اجرا:\n{result.error}")
+            lines = [f"خطا در اجرا:\n{result.error}"]
+            if result.error_node_id:
+                node_item = self.scene.node_items.get(result.error_node_id)
+                if node_item is not None:
+                    lines.append(f"\nNode مقصر: {node_item.node_instance.label} ({result.error_node_id})")
+            if result.results:
+                lines.append("\nنتایج جزئی پیش از خطا:")
+                for node_id, value in result.results.items():
+                    node_item = self.scene.node_items.get(node_id)
+                    label = node_item.node_instance.label if node_item else node_id
+                    lines.append(f"  {label} -> {value!r}")
+            if result.traceback_text:
+                lines.append("\nTraceback:\n" + result.traceback_text)
+            self.console_view.setPlainText("\n".join(lines))
+            self.statusBar().showMessage(f"اجرا شکست خورد: {result.error}", 10000)

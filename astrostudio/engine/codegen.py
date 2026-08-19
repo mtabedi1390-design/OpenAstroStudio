@@ -11,7 +11,7 @@ Notebook اجرا کند یا حتی خارج از AstroStudio از آن است�
 from __future__ import annotations
 
 from .graph import Graph
-from .node import NodeInstance
+from .node import NodeInstance, has_value
 
 
 def _format_value(value) -> str:
@@ -42,15 +42,18 @@ def generate_code(graph: Graph) -> str:
     lines.append("")
 
     for node in order:
-        args = _build_call_arguments(graph, node)
+        args, missing = _build_call_arguments(graph, node)
         call_expr = f"{node.spec.callable_ref.__name__}({args})"
         var = node.var_name()
-        lines.append(f"{var} = {call_expr}  # {node.label}")
+        comment = node.label
+        if missing:
+            comment += "  -- TODO: مقدار این پارامترهای اجباری تعیین نشده است: " + ", ".join(missing)
+        lines.append(f"{var} = {call_expr}  # {comment}")
 
     return "\n".join(lines)
 
 
-def _build_call_arguments(graph: Graph, node: NodeInstance) -> str:
+def _build_call_arguments(graph: Graph, node: NodeInstance) -> tuple[str, list[str]]:
     """
     برای یک Node، رشته‌ی آرگومان‌های فراخوانی را می‌سازد؛ با در نظر گرفتن
     این‌که هر پارامتر ممکن است:
@@ -60,14 +63,18 @@ def _build_call_arguments(graph: Graph, node: NodeInstance) -> str:
     incoming = {c.target_port: c for c in graph.incoming_connections(node.id)}
 
     parts: list[str] = []
+    missing: list[str] = []
     for param in node.spec.params:
         if param.name in incoming:
             conn = incoming[param.name]
             source_node = graph.nodes[conn.source_node_id]
             parts.append(f"{param.name}={source_node.var_name()}")
-        elif param.name in node.param_values:
+        elif has_value(node, param):
             parts.append(f"{param.name}={_format_value(node.param_values[param.name])}")
         elif param.required:
-            parts.append(f"{param.name}=None  # TODO: مقدار این پارامتر تنظیم نشده است")
+            # کامنت TODO به انتهای خط منتقل می‌شود: در میانه‌ی فهرست آرگومان‌ها
+            # بقیه‌ی خط را کامنت می‌کرد و کد تولیدشده SyntaxError می‌داد.
+            parts.append(f"{param.name}=None")
+            missing.append(param.name)
 
-    return ", ".join(parts)
+    return ", ".join(parts), missing
