@@ -20,9 +20,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .binding import param_bindings
 from .graph import Graph
 from .node import NodeInstance
 from .codegen import generate_code
+from .utils import format_exception
 
 
 @dataclass
@@ -46,19 +48,17 @@ def execute_direct(graph: Graph) -> ExecutionResult:
     except Exception as exc:  # noqa: BLE001 - می‌خواهیم هر خطا را به کاربر نشان دهیم
         return ExecutionResult(success=False, results=results,
                                 generated_code=generate_code(graph),
-                                error=f"{type(exc).__name__}: {exc}")
+                                error=format_exception(exc))
 
 
 def _resolve_kwargs(graph: Graph, node: NodeInstance,
                      results: dict[str, Any]) -> dict[str, Any]:
-    incoming = {c.target_port: c for c in graph.incoming_connections(node.id)}
     kwargs: dict[str, Any] = {}
-    for param in node.spec.params:
-        if param.name in incoming:
-            conn = incoming[param.name]
-            kwargs[param.name] = results[conn.source_node_id]
-        elif param.name in node.param_values:
-            kwargs[param.name] = node.param_values[param.name]
+    for binding in param_bindings(graph, node):
+        if binding.is_connected:
+            kwargs[binding.name] = results[binding.source.id]
+        elif binding.has_value:
+            kwargs[binding.name] = binding.value
     return kwargs
 
 
@@ -76,4 +76,4 @@ def execute_generated_code(graph: Graph) -> ExecutionResult:
         return ExecutionResult(success=True, results=results, generated_code=code)
     except Exception as exc:  # noqa: BLE001
         return ExecutionResult(success=False, generated_code=code,
-                                error=f"{type(exc).__name__}: {exc}")
+                                error=format_exception(exc))

@@ -16,12 +16,25 @@ from PySide6.QtWidgets import (
     QGraphicsPathItem, QGraphicsTextItem, QGraphicsSceneMouseEvent,
 )
 
-from ..engine.node import NodeInstance
+from ..engine.node import NodeInstance, PortSpec
 
 PORT_RADIUS = 6
 NODE_WIDTH = 180
 HEADER_HEIGHT = 28
 ROW_HEIGHT = 20
+
+
+def make_text_item(text: str, parent: QGraphicsItem, pos: tuple[float, float], *,
+                   point_size: int, bold: bool = False) -> QGraphicsTextItem:
+    """یک متن سفید روی یک آیتم گرافیکی می‌گذارد (عنوان Node یا برچسب پورت)."""
+    item = QGraphicsTextItem(text, parent)
+    item.setDefaultTextColor(QColor("white"))
+    font = QFont()
+    font.setPointSize(point_size)
+    font.setBold(bold)
+    item.setFont(font)
+    item.setPos(*pos)
+    return item
 
 
 class PortItem(QGraphicsEllipseItem):
@@ -65,36 +78,20 @@ class NodeGraphicsItem(QGraphicsRectItem):
         self.setPen(QPen(QColor("#1c1c1c"), 1.5))
         self.setPos(*node_instance.position)
 
-        title = QGraphicsTextItem(node_instance.label, self)
-        title.setDefaultTextColor(QColor("white"))
-        font = QFont()
-        font.setBold(True)
-        font.setPointSize(9)
-        title.setFont(font)
-        title.setPos(6, 4)
+        make_text_item(node_instance.label, self, (6, 4), point_size=9, bold=True)
 
-        self.in_ports: dict[str, PortItem] = {}
-        self.out_ports: dict[str, PortItem] = {}
+        self.in_ports = self._build_ports(node_instance.spec.inputs, "in")
+        self.out_ports = self._build_ports(node_instance.spec.outputs, "out")
 
-        for i, port_spec in enumerate(node_instance.spec.inputs):
-            item = PortItem(port_spec.name, "in", self, i)
-            self.in_ports[port_spec.name] = item
-            label = QGraphicsTextItem(port_spec.name, self)
-            label.setDefaultTextColor(QColor("white"))
-            label.setPos(8, HEADER_HEIGHT + i * ROW_HEIGHT)
-            small = QFont()
-            small.setPointSize(8)
-            label.setFont(small)
-
-        for i, port_spec in enumerate(node_instance.spec.outputs):
-            item = PortItem(port_spec.name, "out", self, i)
-            self.out_ports[port_spec.name] = item
-            label = QGraphicsTextItem(port_spec.name, self)
-            label.setDefaultTextColor(QColor("white"))
-            label.setPos(NODE_WIDTH - 8 - 60, HEADER_HEIGHT + i * ROW_HEIGHT)
-            small = QFont()
-            small.setPointSize(8)
-            label.setFont(small)
+    def _build_ports(self, port_specs: list[PortSpec], direction: str) -> dict[str, PortItem]:
+        """پورت‌ها و برچسب‌هایشان را می‌سازد (ورودی چپ‌چین، خروجی راست‌چین)."""
+        label_x = 8 if direction == "in" else NODE_WIDTH - 8 - 60
+        ports: dict[str, PortItem] = {}
+        for i, port_spec in enumerate(port_specs):
+            ports[port_spec.name] = PortItem(port_spec.name, direction, self, i)
+            make_text_item(port_spec.name, self,
+                           (label_x, HEADER_HEIGHT + i * ROW_HEIGHT), point_size=8)
+        return ports
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionHasChanged:

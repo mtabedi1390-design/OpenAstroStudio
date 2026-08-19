@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 
+from .binding import param_bindings
 from .graph import Graph
 from .node import NodeInstance
 
@@ -96,19 +97,15 @@ def _build_call_arguments(graph: Graph, node: NodeInstance) -> str:
       (الف) به خروجی یک Node دیگر وصل باشد (از طریق Connection), یا
       (ب) مقدار ثابتی داشته باشد که کاربر در پنل تنظیم کرده.
     """
-    incoming = {c.target_port: c for c in graph.incoming_connections(node.id)}
-
     parts: list[str] = []
-    for param in node.spec.params:
-        if not param.name.isidentifier():
-            raise ValueError(f"نام پارامتر نامعتبر است: {param.name!r}")
-        if param.name in incoming:
-            conn = incoming[param.name]
-            source_node = graph.nodes[conn.source_node_id]
-            parts.append(f"{param.name}={source_node.var_name()}")
-        elif param.name in node.param_values:
-            parts.append(f"{param.name}={_format_value(node.param_values[param.name])}")
-        elif param.required:
-            parts.append(f"{param.name}=None  # TODO: مقدار این پارامتر تنظیم نشده است")
+    for binding in param_bindings(graph, node):
+        if not binding.name.isidentifier():
+            raise ValueError(f"نام پارامتر نامعتبر است: {binding.name!r}")
+        if binding.is_connected:
+            parts.append(f"{binding.name}={binding.source.var_name()}")
+        elif binding.has_value:
+            parts.append(f"{binding.name}={_format_value(binding.value)}")
+        elif binding.is_missing_required:
+            parts.append(f"{binding.name}=None  # TODO: مقدار این پارامتر تنظیم نشده است")
 
     return ", ".join(parts)
